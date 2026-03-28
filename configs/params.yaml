@@ -1,0 +1,28 @@
+data:
+  raw_train: "data/raw/train.csv"
+  raw_store: "data/raw/store.csv"
+  processed_dir: "data/processed"
+
+features:
+  target: "Sales"
+  baseline:
+    - "Store"
+    - "DayOfWeek"
+    - "Promo"
+    - "Open"
+  categorical:
+    - "DayOfWeek"
+  numerical:
+    - "Store"
+    - "Promo"
+    - "Open"
+
+train:
+  test_size: 0.2
+  random_state: 42
+  experiment_name: "Rossmann_Baseline"
+
+model:
+  type: "Ridge"
+  alpha: 1.0
+  save_path: "models/baseline_ridge.pkl"
