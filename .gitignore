@@ -231,9 +231,12 @@ __marimo__/
 
 # Others
 dev_docs/
+temp/
+tmp/
 
 # MLOps Project Specific
-data/*
+data/**
+!data/**/
 !data/**/*.dvc
 !data/**/.gitignore
 mlruns/
