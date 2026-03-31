@@ -26,3 +26,4 @@ model:
   type: "Ridge"
   alpha: 1.0
   save_path: "models/baseline_ridge.pkl"
+  validation_threshold: 0.05

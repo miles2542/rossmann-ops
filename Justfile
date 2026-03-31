@@ -11,4 +11,4 @@ format:
     uv run ruff format .
 
 test:
-    uv run pytest tests/
+    uv run pytest tests/ -v
