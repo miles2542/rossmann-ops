@@ -12,3 +12,6 @@ format:
 
 test:
     uv run pytest tests/
+
+train-prod:
+    uv run python src/train_model.py
