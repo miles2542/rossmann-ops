@@ -6,8 +6,8 @@ import mlflow
 import mlflow.xgboost
 import pandas as pd
 import shap
-import yaml
 import xgboost as xgb
+import yaml
 from shapash import SmartExplainer
 from sklearn.model_selection import train_test_split
 
@@ -86,7 +86,7 @@ def train_production_model() -> None:
             random_state=params["train"]["random_state"],
             tree_method="hist"  # for performance
         )
-        
+
         model.fit(X_train, y_train)
 
         # 6. Explainability (SHAP)
@@ -107,7 +107,7 @@ def train_production_model() -> None:
         logger.info("Generating Shapash HTML report...")
         xpl = SmartExplainer(model=model)
         xpl.compile(x=sample_X, y_target=y_test.loc[sample_X.index])
-        
+
         report_path = "shapash_report.html"
         xpl.generate_report(
             output_file=report_path,
@@ -119,7 +119,7 @@ def train_production_model() -> None:
 
         # 8. Explicit Model Logging
         mlflow.xgboost.log_model(model, "production_model")
-        
+
         logger.info(f"Production training complete. Run ID: {run.info.run_id}")
 
 
