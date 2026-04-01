@@ -11,7 +11,7 @@ format:
     uv run ruff format .
 
 test:
-    uv run pytest tests/
+    uv run pytest tests/ -v
 
 train-prod:
     uv run python src/train_model.py
