@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -8,7 +10,6 @@ import pandas as pd
 import shap
 import xgboost as xgb
 import yaml
-from shapash import SmartExplainer
 from sklearn.model_selection import train_test_split
 
 from src.data_validation import validate_data
@@ -99,25 +100,16 @@ def train_production_model() -> None:
         plt.figure(figsize=(10, 6))
         shap.summary_plot(shap_values, sample_X, show=False)
         plt.tight_layout()
-        plt.savefig("shap_summary.png")
-        mlflow.log_artifact("shap_summary.png")
+        
+        # Use system's native temporary directory for absolute robustness (CI/CD safe)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            shap_tmp_path = os.path.join(tmp_dir, "shap_summary.png")
+            plt.savefig(shap_tmp_path)
+            mlflow.log_artifact(shap_tmp_path)
+            
         plt.close()
 
-        # 7. Supplemental Diagnostics (Shapash)
-        logger.info("Generating Shapash HTML report...")
-        xpl = SmartExplainer(model=model)
-        xpl.compile(x=sample_X, y_target=y_test.loc[sample_X.index])
-
-        report_path = "shapash_report.html"
-        xpl.generate_report(
-            output_file=report_path,
-            project_info_file=None, # Optional
-            title_story="Rossmann Production Model Report",
-            title_description="XGBoost performance and feature importance analysis."
-        )
-        mlflow.log_artifact(report_path)
-
-        # 8. Explicit Model Logging
+        # 7. Explicit Model Logging
         mlflow.xgboost.log_model(model, "production_model")
 
         logger.info(f"Production training complete. Run ID: {run.info.run_id}")
