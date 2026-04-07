@@ -244,3 +244,4 @@ mlartifacts/
 *.pkl
 *.onnx
 .ipynb_checkpoints/
+/models
