@@ -1,5 +1,9 @@
 set shell := ["pwsh", "-c"]
 
+setup:
+    uv sync
+    dvc pull
+
 install:
     uv sync
 
@@ -14,4 +18,13 @@ test:
     uv run pytest tests/ -v
 
 train-prod:
-    uv run python src/train_model.py
+    uv run python -m src.train_model
+
+export-model:
+    uv run python -m scripts.export_model
+
+build-api: export-model
+    docker build -f Dockerfile.api -t rossmann-api:latest .
+
+build-ui:
+    docker build -f Dockerfile.ui -t rossmann-ui:latest .
