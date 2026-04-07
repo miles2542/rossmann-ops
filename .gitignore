@@ -241,6 +241,9 @@ data/**
 !data/**/.gitignore
 mlruns/
 mlartifacts/
+models/
 *.pkl
 *.onnx
+*.ubj
 .ipynb_checkpoints/
+/models
