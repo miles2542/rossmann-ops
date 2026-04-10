@@ -1,0 +1,14 @@
+apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+name: rossmann-cluster
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30000
+        hostPort: 30000
+        protocol: TCP
+      - containerPort: 30100
+        hostPort: 30100
+        protocol: TCP
+  - role: worker
+  - role: worker
