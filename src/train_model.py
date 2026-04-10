@@ -71,8 +71,10 @@ def train_production_model() -> None:
     )
 
     # 5. MLflow Tracking & Training
+    mlflow.set_tracking_uri("sqlite:///mlruns/mlflow.db")
     mlflow.set_experiment("Rossmann_Production")
-    mlflow.xgboost.autolog()
+    # Disable autologging the model to avoid duplicate with manual log_model below
+    mlflow.xgboost.autolog(log_models=False)
 
     with mlflow.start_run() as run:
         # Log custom parameter for fill value
@@ -88,7 +90,28 @@ def train_production_model() -> None:
             tree_method="hist"  # for performance
         )
 
-        model.fit(X_train, y_train)
+        # Passing eval_set allows XGBoost autolog to capture training/validation learning curves
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_train, y_train), (X_test, y_test)],
+            verbose=False
+        )
+        
+        # 5.5 Calculate and Log Explicit Metrics
+        from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+        import numpy as np
+        
+        logger.info("Calculating evaluation metrics...")
+        preds = model.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, preds))
+        mae = mean_absolute_error(y_test, preds)
+        r2 = r2_score(y_test, preds)
+        
+        mlflow.log_metrics({
+            "rmse": rmse,
+            "mae": mae,
+            "r2": r2
+        })
 
         # 6. Explainability (SHAP)
         logger.info("Generating SHAP summary plot...")
@@ -109,10 +132,11 @@ def train_production_model() -> None:
             
         plt.close()
 
-        # 7. Explicit Model Logging
+        # 7. Explicit Model Logging (Custom name used by API/Export scripts)
         mlflow.xgboost.log_model(model, "production_model")
 
         logger.info(f"Production training complete. Run ID: {run.info.run_id}")
+
 
 
 if __name__ == "__main__":
