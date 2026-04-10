@@ -39,12 +39,14 @@ spec:
               cpu: "500m"
               memory: "512Mi"
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /_stcore/health
               port: 8501
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /_stcore/health
               port: 8501
             initialDelaySeconds: 20
             periodSeconds: 20

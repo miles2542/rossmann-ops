@@ -16,6 +16,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
 COPY configs/ ./configs/
 COPY models/ ./models/
+COPY data/raw/store.csv ./data/raw/
 
 # Set environment variables
 ENV PYTHONPATH=/app

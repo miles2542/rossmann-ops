@@ -47,25 +47,53 @@ def load_artifacts():
         else:
             logger.error(f"Store metadata not found at {store_path}")
 
-        # 3. Load Model with Graceful Fallback
-        model_path = PROJECT_ROOT / "models" / "production_model"
-        if model_path.exists():
-            MODEL = mlflow.xgboost.load_model(str(model_path))
-            logger.info(f"Production model loaded from {model_path}")
-        else:
-            logger.warning(f"No model found at {model_path}. Predict endpoint will be disabled.")
+        # 3. Load Model with Remote Registry capability & Graceful Local Fallback
+        model_uri = os.getenv("MLFLOW_MODEL_URI")
+        tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+
+        if model_uri and tracking_uri:
+            try:
+                logger.info(f"Attempting dynamic model load from registry: {model_uri}")
+                mlflow.set_tracking_uri(tracking_uri)
+                MODEL = mlflow.xgboost.load_model(model_uri)
+                logger.info("Successfully loaded model from remote registry.")
+            except Exception as e:
+                logger.warning(f"Failed to load from registry, falling back to local: {e}")
+
+        if MODEL is None:
+            model_path = PROJECT_ROOT / "models" / "production_model"
+            if model_path.exists():
+                MODEL = mlflow.xgboost.load_model(str(model_path))
+                logger.info(f"Production model loaded from {model_path}")
+            else:
+                logger.warning("No model found dynamically or locally. Predict endpoint disabled.")
             
     except Exception as e:
         logger.error(f"Startup failed: {e}")
 
+@app.get("/health/live")
+def liveness_check():
+    """
+    Returns 200 if the server process is running.
+    Used for Kubernetes Liveness Probes.
+    """
+    return {"status": "alive"}
+
 @app.get("/health")
-def health_check():
+def readiness_check(response: Response):
     """
     Returns system health and model status.
+    Returns HTTP 503 if the service is not ready.
+    Used for Kubernetes Readiness Probes.
     """
+    is_ready = STORE_DF is not None and MODEL is not None
+    if not is_ready:
+        response.status_code = 503
+
     return {
-        "status": "healthy" if STORE_DF is not None else "degraded",
+        "status": "healthy" if is_ready else "degraded",
         "model_loaded": MODEL is not None,
+        "store_data_loaded": STORE_DF is not None,
         "model_version": MODEL_VERSION,
         "environment": os.getenv("ENV", "development")
     }

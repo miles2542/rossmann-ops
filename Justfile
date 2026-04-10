@@ -29,8 +29,23 @@ build-api: export-model
 build-ui:
     docker build -f Dockerfile.ui -t rossmann-ui:latest .
 
+setup-prod:
+    just setup
+    just train-prod
+    just build-api
+    just build-ui
+    just k8s-up
+    just k8s-load
+    just k8s-deploy
+
+clean-artifacts:
+    @$confirm = Read-Host 'Are you sure you want to delete mlruns/ and models/ and mlflow.db? (Y/N)'; if ($confirm -eq 'Y') { Remove-Item -Recurse -Force mlruns, mlartifacts, models, mlflow.db -ErrorAction SilentlyContinue; Write-Host 'Wiped.' }
+
 k8s-up:
-    kind create cluster --name rossmann-cluster --config k8s/kind-config.yaml
+    @if (-not (kind get clusters | Select-String 'rossmann-cluster')) { kind create cluster --name rossmann-cluster --config k8s/kind-config.yaml } else { Write-Host 'Cluster already exists, skipping creation.' }
+
+k8s-down:
+    kind delete cluster --name rossmann-cluster
 
 k8s-load:
     kind load docker-image rossmann-api:latest rossmann-ui:latest --name rossmann-cluster
@@ -41,3 +56,6 @@ k8s-deploy:
 
 k8s-status:
     kubectl get pods,services
+
+mlflow-ui:
+    uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
