@@ -36,14 +36,16 @@ spec:
               cpu: "500m"
               memory: "512Mi"
           readinessProbe:
-            tcpSocket:
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8000
             initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 20
             periodSeconds: 20
 
 ---
