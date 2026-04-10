@@ -2,6 +2,7 @@ import logging
 import shutil
 from pathlib import Path
 
+import mlflow
 from mlflow.tracking import MlflowClient
 
 # Configure logging
@@ -14,6 +15,7 @@ def export_latest_model():
     Finds the latest run in 'Rossmann_Production' or 'Rossmann_Baseline'
     and copies the model artifact to models/production_model.pkl.
     """
+    mlflow.set_tracking_uri("sqlite:///mlruns/mlflow.db")
     client = MlflowClient()
     experiment_name = "Rossmann_Production"
 
