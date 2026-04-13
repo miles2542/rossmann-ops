@@ -7,7 +7,9 @@ import mlflow
 from mlflow.tracking import MlflowClient
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -16,7 +18,9 @@ def export_latest_model():
     Finds the latest run in 'Rossmann_Production' or 'Rossmann_Baseline'
     and copies the model artifact to models/production_model.pkl.
     """
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db"))
+    mlflow.set_tracking_uri(
+        os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db")
+    )
     client = MlflowClient()
     experiment_name = "Rossmann_Production"
 
@@ -32,7 +36,7 @@ def export_latest_model():
     runs = client.search_runs(
         experiment_ids=[experiment.experiment_id],
         order_by=["attribute.start_time DESC"],
-        max_results=1
+        max_results=1,
     )
 
     if not runs:
@@ -45,7 +49,7 @@ def export_latest_model():
 
     # 3. Path setup
     project_root = Path(__file__).parent.parent
-    
+
     # MLflow logs models as a full directory (MLmodel, conda.yaml, model binary).
     # Exporting the entire directory is the most robust practice across all platforms.
     artifact_path = "production_model"
@@ -54,11 +58,11 @@ def export_latest_model():
     local_path = client.download_artifacts(run_id, artifact_path)
 
     dest_path = project_root / "models" / "production_model"
-    
+
     # Clean up old directory if it exists to prevent stale files mixing
     if dest_path.exists():
         shutil.rmtree(dest_path)
-        
+
     shutil.copytree(local_path, dest_path)
     logger.info(f"Successfully exported full model directory to {dest_path}")
 
@@ -70,6 +74,7 @@ def export_latest_model():
             logger.info("Exported SHAP summary to models/shap_summary.png")
     except Exception as e:
         logger.warning(f"Could not export SHAP summary: {e}")
+
 
 if __name__ == "__main__":
     export_latest_model()

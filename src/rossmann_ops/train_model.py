@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 def train_production_model() -> None:
     # 1. Setup paths and load config
-    project_root = Path(__file__).parent.parent.parent  # src/rossmann_ops/ -> src/ -> repo root
+    project_root = Path(
+        __file__
+    ).parent.parent.parent  # src/rossmann_ops/ -> src/ -> repo root
     config_path = project_root / "configs" / "params.yaml"
     with open(config_path, "r") as f:
         params = yaml.safe_load(f)
@@ -53,8 +55,16 @@ def train_production_model() -> None:
     # Define features (Maianh's expanded feature set)
     # We include our new time features and handle categorical encoding via XGBoost
     features = [
-        "Store", "DayOfWeek", "Promo", "Year", "Month", "Day", "WeekOfYear",
-        "CompetitionDistance", "CompetitionOpenSinceMonth", "CompetitionOpenSinceYear"
+        "Store",
+        "DayOfWeek",
+        "Promo",
+        "Year",
+        "Month",
+        "Day",
+        "WeekOfYear",
+        "CompetitionDistance",
+        "CompetitionOpenSinceMonth",
+        "CompetitionOpenSinceYear",
     ]
     target = params["features"]["target"]
 
@@ -71,7 +81,9 @@ def train_production_model() -> None:
     )
 
     # 5. MLflow Tracking & Training
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db"))
+    mlflow.set_tracking_uri(
+        os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db")
+    )
     mlflow.set_experiment("Rossmann_Production")
     # Disable autologging the model to avoid duplicate with manual log_model below
     mlflow.xgboost.autolog(log_models=False)
@@ -87,31 +99,28 @@ def train_production_model() -> None:
             learning_rate=0.1,
             max_depth=7,
             random_state=params["train"]["random_state"],
-            tree_method="hist"  # for performance
+            tree_method="hist",  # for performance
         )
 
         # Passing eval_set allows XGBoost autolog to capture training/validation learning curves
         model.fit(
-            X_train, y_train,
+            X_train,
+            y_train,
             eval_set=[(X_train, y_train), (X_test, y_test)],
-            verbose=False
+            verbose=False,
         )
-        
+
         # 5.5 Calculate and Log Explicit Metrics
-        from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
         import numpy as np
-        
+        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
         logger.info("Calculating evaluation metrics...")
         preds = model.predict(X_test)
         rmse = np.sqrt(mean_squared_error(y_test, preds))
         mae = mean_absolute_error(y_test, preds)
         r2 = r2_score(y_test, preds)
-        
-        mlflow.log_metrics({
-            "rmse": rmse,
-            "mae": mae,
-            "r2": r2
-        })
+
+        mlflow.log_metrics({"rmse": rmse, "mae": mae, "r2": r2})
 
         # 6. Explainability (SHAP)
         logger.info("Generating SHAP summary plot...")
@@ -123,20 +132,19 @@ def train_production_model() -> None:
         plt.figure(figsize=(10, 6))
         shap.summary_plot(shap_values, sample_X, show=False)
         plt.tight_layout()
-        
+
         # Use system's native temporary directory for absolute robustness (CI/CD safe)
         with tempfile.TemporaryDirectory() as tmp_dir:
             shap_tmp_path = os.path.join(tmp_dir, "shap_summary.png")
             plt.savefig(shap_tmp_path)
             mlflow.log_artifact(shap_tmp_path)
-            
+
         plt.close()
 
         # 7. Explicit Model Logging (Custom name used by API/Export scripts)
         mlflow.xgboost.log_model(model, "production_model")
 
         logger.info(f"Production training complete. Run ID: {run.info.run_id}")
-
 
 
 if __name__ == "__main__":
