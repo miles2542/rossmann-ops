@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def train_production_model() -> None:
     # 1. Setup paths and load config
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).parent.parent.parent  # src/rossmann_ops/ -> src/ -> repo root
     config_path = project_root / "configs" / "params.yaml"
     with open(config_path, "r") as f:
         params = yaml.safe_load(f)
@@ -71,7 +71,7 @@ def train_production_model() -> None:
     )
 
     # 5. MLflow Tracking & Training
-    mlflow.set_tracking_uri("sqlite:///mlruns/mlflow.db")
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db"))
     mlflow.set_experiment("Rossmann_Production")
     # Disable autologging the model to avoid duplicate with manual log_model below
     mlflow.xgboost.autolog(log_models=False)
