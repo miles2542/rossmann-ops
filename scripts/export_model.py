@@ -15,8 +15,15 @@ logger = logging.getLogger(__name__)
 
 def export_latest_model():
     """
-    Finds the latest run in 'Rossmann_Production' or 'Rossmann_Baseline'
-    and copies the model artifact to models/production_model.pkl.
+    LOCAL UTILITY — not called by the CI/CD pipeline.
+
+    Finds the latest run in 'Rossmann_Production' and copies the model
+    artifact from the MLflow artifact store to models/production_model/.
+    Use this locally to swap in a specific historical run without retraining:
+
+        MLFLOW_TRACKING_URI=... uv run python scripts/export_model.py
+
+    In CI, train_model.py saves the model directly to models/ during training.
     """
     mlflow.set_tracking_uri(
         os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db")

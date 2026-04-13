@@ -87,9 +87,6 @@ jobs:
       - name: Train production model
         run: uv run python -m rossmann_ops.train_model
 
-      - name: Export model to models/
-        run: uv run python scripts/export_model.py
-
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
         with:
