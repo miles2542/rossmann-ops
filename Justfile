@@ -1,4 +1,5 @@
-set shell := ["pwsh", "-c"]
+set windows-shell := ["pwsh", "-c"]
+export PYTHONPATH := "src"
 
 setup:
     uv sync
@@ -18,7 +19,7 @@ test:
     uv run pytest tests/ -v
 
 train-prod:
-    uv run python -m src.train_model
+    uv run python -m rossmann_ops.train_model
 
 export-model:
     uv run python -m scripts.export_model
@@ -39,10 +40,10 @@ setup-prod:
     just k8s-deploy
 
 clean-artifacts:
-    @$confirm = Read-Host 'Are you sure you want to delete mlruns/ and models/ and mlflow.db? (Y/N)'; if ($confirm -eq 'Y') { Remove-Item -Recurse -Force mlruns, mlartifacts, models, mlflow.db -ErrorAction SilentlyContinue; Write-Host 'Wiped.' }
+    @uv run python -c "import shutil, os; x = input('Are you sure you want to delete mlruns/, models/, mlflow.db? (Y/N) '); [(shutil.rmtree(d, ignore_errors=True) if os.path.exists(d) else None) for d in ['mlruns', 'mlartifacts', 'models']] if x.lower()=='y' else None; (os.remove('mlflow.db') if os.path.exists('mlflow.db') else None) if x.lower()=='y' else None; print('Wiped.') if x.lower()=='y' else print('Aborted.')"
 
 k8s-up:
-    @if (-not (kind get clusters | Select-String 'rossmann-cluster')) { kind create cluster --name rossmann-cluster --config k8s/kind-config.yaml } else { Write-Host 'Cluster already exists, skipping creation.' }
+    @uv run python -c "import subprocess as sp; exists = b'rossmann-cluster' in sp.run(['kind', 'get', 'clusters'], capture_output=True).stdout; sp.run(['kind', 'create', 'cluster', '--name', 'rossmann-cluster', '--config', 'k8s/kind-config.yaml']) if not exists else print('Cluster already exists, skipping creation.')"
 
 k8s-down:
     kind delete cluster --name rossmann-cluster

@@ -2,3 +2,5 @@
     remote = local-storage
 ['remote "local-storage"']
     url = X:\Programming\Python\Projects\E2E pipelines\rossmann-ops\temp
+['remote "dagshub"']
+    url = https://dagshub.com/miles2542/rossmann-ops.dvc
