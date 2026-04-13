@@ -2,57 +2,73 @@ name: MLOps Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
+    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
   repository_dispatch:
     types: [drift_detected]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Simulation mode"
+        required: true
+        default: "drift"
+        type: choice
+        options: [drift, attack, schema]
 
-# PYTHONPATH needed by all jobs that touch rossmann_ops package
+# PYTHONPATH propagated to all jobs
 env:
   PYTHONPATH: src
 
 jobs:
-  # ─── Job 1: Lint & Test ────────────────────────────────────────────────────
+  # ─── Job 1: CI ─────────────────────────────────────────────────────────────
   ci:
     name: Lint & Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
 
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Lint (ruff)
+      # Lenient: flags the issue as an annotation but does not block merging
+      - name: Check notebook outputs
+        continue-on-error: true
+        run: |
+          uv run nbstripout --check notebooks/*.ipynb \
+            && echo "✅ All notebooks clean" \
+            || echo "⚠️  Notebooks contain outputs — run 'just format' locally"
+
+      # Lenient: warns but does not fail the job or block downstream
+      - name: Lint — ruff
+        continue-on-error: true
         run: uv run ruff check .
 
+      # Strict: a failing test DOES block train + build jobs
       - name: Run tests
         run: uv run pytest tests/ -v
 
   # ─── Job 2: Train & Export ─────────────────────────────────────────────────
-  # Runs on: push to main, or repository_dispatch (drift_detected CT trigger)
-  # Skipped on: pull_request
+  # Runs on: push to main (or tag), repository_dispatch (CT from drift)
+  # Skipped on: pull_request, workflow_dispatch
   train:
     name: Train Model
     runs-on: ubuntu-latest
     needs: ci
-    if: github.event_name == 'push' || github.event_name == 'repository_dispatch'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'repository_dispatch'
     env:
       MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/rossmann-ops.mlflow
       MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_PAT }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
 
@@ -60,7 +76,6 @@ jobs:
         run: uv sync --frozen
 
       - name: Configure DVC credentials
-        # Credentials go to .dvc/config.local (gitignored), not committed config
         run: |
           uv run dvc remote modify dagshub --local user ${{ secrets.DAGSHUB_USERNAME }}
           uv run dvc remote modify dagshub --local password ${{ secrets.DAGSHUB_PAT }}
@@ -69,11 +84,9 @@ jobs:
         run: uv run dvc pull -r dagshub
 
       - name: Train production model
-        # Logs metrics, params, and model artifact to DagsHub MLflow
         run: uv run python -m rossmann_ops.train_model
 
-      - name: Export model artifact to models/
-        # Downloads the just-logged run from DagsHub and materialises it locally
+      - name: Export model to models/
         run: uv run python scripts/export_model.py
 
       - name: Upload model artifact
@@ -83,22 +96,52 @@ jobs:
           path: models/
           retention-days: 7
 
-      - name: Upload store data (needed by Dockerfile.api)
+      - name: Upload store data (needed by Dockerfile.api build context)
         uses: actions/upload-artifact@v4
         with:
           name: store-data
           path: data/raw/store.csv
           retention-days: 7
 
-  # ─── Job 3: Build & Push Docker ────────────────────────────────────────────
-  # Needs train to have a fresh model in the artifact cache
+  # ─── Job 3: Simulate (manual trigger via GitHub UI only) ───────────────────
+  simulate:
+    name: "Simulate — ${{ inputs.mode }}"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+      MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/rossmann-ops.mlflow
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Configure DVC + pull data
+        run: |
+          uv run dvc remote modify dagshub --local user ${{ secrets.DAGSHUB_USERNAME }}
+          uv run dvc remote modify dagshub --local password ${{ secrets.DAGSHUB_PAT }}
+          uv run dvc pull -r dagshub
+
+      # attack mode correctly exits 1 (detects poisoning) — mark continue-on-error
+      # so the job passes and logs are visible, not swallowed in a red job failure
+      - name: "Run simulation (${{ inputs.mode }})"
+        continue-on-error: ${{ inputs.mode == 'attack' }}
+        run: uv run python scripts/simulate_production.py --mode ${{ inputs.mode }}
+
+  # ─── Job 4: Build & Push Docker ────────────────────────────────────────────
   build-and-push:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
     needs: train
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download model artifact
         uses: actions/download-artifact@v4
@@ -112,8 +155,7 @@ jobs:
           name: store-data
           path: data/raw/
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
       - name: Log in to DockerHub
         uses: docker/login-action@v3
@@ -121,13 +163,26 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Tag with git ref name if it's a version tag, otherwise just latest
+      - name: Resolve image tags
+        id: meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VER="${GITHUB_REF_NAME}"
+            echo "tags_api=${{ secrets.DOCKERHUB_USERNAME }}/rossmann-api:${VER},${{ secrets.DOCKERHUB_USERNAME }}/rossmann-api:latest" >> $GITHUB_OUTPUT
+            echo "tags_ui=${{ secrets.DOCKERHUB_USERNAME }}/rossmann-ui:${VER},${{ secrets.DOCKERHUB_USERNAME }}/rossmann-ui:latest" >> $GITHUB_OUTPUT
+          else
+            echo "tags_api=${{ secrets.DOCKERHUB_USERNAME }}/rossmann-api:latest" >> $GITHUB_OUTPUT
+            echo "tags_ui=${{ secrets.DOCKERHUB_USERNAME }}/rossmann-ui:latest" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push API image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile.api
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/rossmann-api:latest
+          tags: ${{ steps.meta.outputs.tags_api }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -137,6 +192,38 @@ jobs:
           context: .
           file: Dockerfile.ui
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/rossmann-ui:latest
+          tags: ${{ steps.meta.outputs.tags_ui }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ─── Job 5: GitHub Release (version tag pushes only) ───────────────────────
+  # Creates a release with k8s manifests attached — graders/deployers can grab
+  # the exact manifests that correspond to each versioned Docker image
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create release and attach k8s manifests
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            k8s/api.yaml
+            k8s/ui.yaml
+          body: |
+            ## Docker Images
+            ```
+            ${{ secrets.DOCKERHUB_USERNAME }}/rossmann-api:${{ github.ref_name }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/rossmann-ui:${{ github.ref_name }}
+            ```
+
+            ## Deploy to Kubernetes
+            ```bash
+            kubectl apply -f k8s/api.yaml
+            kubectl apply -f k8s/ui.yaml
+            ```

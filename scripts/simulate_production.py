@@ -23,10 +23,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+_project_root = Path(__file__).resolve().parents[1]
+_config_path = _project_root / "configs" / "params.yaml"
+with open(_config_path, "r") as _f:
+    _cfg = yaml.safe_load(_f)
+
+_sim = _cfg["pipeline"]["simulation"]
+_gh = _cfg["pipeline"]["github"]
+
+API_URL = os.getenv("API_URL", _sim["api_url"])
 GITHUB_PAT = os.getenv("GITHUB_PAT")
-REPO_OWNER = "miles2542"
-REPO_NAME = "rossmann-ops"
+REPO_OWNER = _gh["owner"]
+REPO_NAME = _gh["repo"]
+Z_SCORE_THRESHOLD = _sim["z_score_threshold"]
+P_VALUE_THRESHOLD = _sim["p_value_threshold"]
+DRIFT_FEATURE = _sim["drift_feature"]
+DRIFT_SHIFT = _sim["drift_shift"]
 
 
 def get_test_data():
@@ -119,9 +131,9 @@ def simulate_attack():
     max_z = np.max(z_scores)
 
     logger.info(f"Maximum detected Z-Score in batch: {max_z:.2f}")
-    if max_z > 3.0:
+    if max_z > Z_SCORE_THRESHOLD:
         logger.error(
-            f"Anomaly/Poisoning detected! Z-Score over threshold (>3). Aborting ingestion."
+            f"Anomaly/Poisoning detected! Z-Score {max_z:.2f} exceeds threshold ({Z_SCORE_THRESHOLD}). Aborting ingestion."
         )
         sys.exit(1)
     else:
@@ -157,18 +169,18 @@ def simulate_drift():
     logger.info("--- Mode: Continuous Training / Drift Simulation ---")
     X_test, _ = get_test_data()
 
-    baseline_feature = X_test["CompetitionDistance"].fillna(0).values
+    baseline_feature = X_test[DRIFT_FEATURE].fillna(0).values
 
-    # Simulate feature drift by shifting the distribution significantly
-    shifted_feature = baseline_feature + 50000
+    # Simulate feature drift by shifting the distribution
+    shifted_feature = baseline_feature + DRIFT_SHIFT
 
     logger.info("Running Kolmogorov-Smirnov (KS-Test) for drift detection...")
     stat, p_value = stats.ks_2samp(baseline_feature, shifted_feature)
 
     logger.info(f"KS Statistic: {stat:.4f}, p-value: {p_value:.4e}")
 
-    if p_value < 0.05:
-        logger.warning("Statistical Data Drift Detected (p-value < 0.05)!")
+    if p_value < P_VALUE_THRESHOLD:
+        logger.warning(f"Statistical Data Drift Detected (p-value {p_value:.4e} < {P_VALUE_THRESHOLD})!")
         trigger_github_workflow()
     else:
         logger.info("No significant drift detected. Model represents real-world well.")
