@@ -49,5 +49,7 @@ def build_features(df: pd.DataFrame, fill_value: float = None) -> pd.DataFrame:
 
         df["CompetitionDistance"] = df["CompetitionDistance"].fillna(fill_value)
 
-    logger.info("Feature engineering complete. Prepared Features: %s", df.columns.tolist())
+    logger.info(
+        "Feature engineering complete. Prepared Features: %s", df.columns.tolist()
+    )
     return df
