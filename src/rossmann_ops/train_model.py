@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -143,6 +144,16 @@ def train_production_model() -> None:
 
         # 7. Explicit Model Logging (Custom name used by API/Export scripts)
         mlflow.xgboost.log_model(model, "production_model")
+
+        # 8. Save model locally so CI/CD pipeline and Docker builds don't need
+        #    a separate network round-trip back to the MLflow artifact store.
+        #    export_model.py remains available as a LOCAL utility to pull any
+        #    historical run by ID without retraining.
+        local_model_dir = project_root / "models" / "production_model"
+        if local_model_dir.exists():
+            shutil.rmtree(local_model_dir)
+        mlflow.xgboost.save_model(model, str(local_model_dir))
+        logger.info(f"Model saved locally to {local_model_dir}")
 
         logger.info(f"Production training complete. Run ID: {run.info.run_id}")
 
