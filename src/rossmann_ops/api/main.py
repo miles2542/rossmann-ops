@@ -27,7 +27,7 @@ app = FastAPI(
 MODEL = None
 STORE_DF = None
 MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0-baseline")
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]  # src/rossmann_ops/api/ -> rossmann_ops/ -> src/ -> repo root
 
 @app.on_event("startup")
 def load_artifacts():
