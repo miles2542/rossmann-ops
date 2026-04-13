@@ -10,8 +10,8 @@ import mlflow.xgboost
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 
-from src.api.schemas import PredictRequest, PredictResponse, DriftRequest
-from src.features import build_features
+from rossmann_ops.api.schemas import PredictRequest, PredictResponse, DriftRequest
+from rossmann_ops.features import build_features
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -137,7 +137,7 @@ def predict(request: PredictRequest):
         
         # 4. Feature selection to match training set
         # Note: We must ensure columns match exactly what xgb regressor expects
-        # These are matched to src/train_model.py
+        # These are matched to src/rossmann_ops/train_model.py
         feature_cols = [
             "Store", "DayOfWeek", "Promo", "Year", "Month", "Day", "WeekOfYear",
             "CompetitionDistance", "CompetitionOpenSinceMonth", "CompetitionOpenSinceYear"

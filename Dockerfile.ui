@@ -18,7 +18,7 @@ COPY src/ ./src/
 COPY configs/ ./configs/
 
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/src
 ENV API_URL=http://localhost:8000
 
 # Expose Streamlit port
