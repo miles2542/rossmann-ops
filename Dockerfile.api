@@ -19,11 +19,11 @@ COPY models/ ./models/
 COPY data/raw/store.csv ./data/raw/
 
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/src
 ENV MODEL_VERSION=v1.0.0
 
 # Expose FastAPI port
 EXPOSE 8000
 
 # Run FastAPI app
-CMD ["uv", "run", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "rossmann_ops.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

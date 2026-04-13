@@ -12,8 +12,8 @@ import xgboost as xgb
 import yaml
 from sklearn.model_selection import train_test_split
 
-from src.data_validation import validate_data
-from src.features import build_features
+from rossmann_ops.data_validation import validate_data
+from rossmann_ops.features import build_features
 
 # Configure logging
 logging.basicConfig(

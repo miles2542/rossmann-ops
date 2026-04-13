@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.features import build_features
+from rossmann_ops.features import build_features
 
 
 def test_build_features_week_of_year():

@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
-from src.data_validation import validate_data
+from rossmann_ops.data_validation import validate_data
 
 # Configure logging
 logging.basicConfig(

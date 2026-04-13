@@ -2,7 +2,7 @@ import pandas as pd
 import pandera as pa
 import pytest
 
-from src.data_validation import validate_data
+from rossmann_ops.data_validation import validate_data
 
 
 def test_negative_sales_rejected():
