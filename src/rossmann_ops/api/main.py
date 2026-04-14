@@ -1,7 +1,6 @@
 import logging
 import os
 from pathlib import Path
-from typing import Dict
 
 import mlflow.xgboost
 import pandas as pd
@@ -9,6 +8,8 @@ import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
+from prometheus_client import Counter
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from rossmann_ops.api.schemas import DriftRequest, PredictRequest, PredictResponse
 from rossmann_ops.features import build_features
@@ -25,6 +26,9 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Prometheus auto-instrumentation: exposes /metrics with RPS, latency, error rate.
+Instrumentator().instrument(app).expose(app)
+
 # Global model and config holders
 MODEL = None
 STORE_DF = None
@@ -32,6 +36,16 @@ MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0-baseline")
 PROJECT_ROOT = (
     Path(__file__).resolve().parents[3]
 )  # src/rossmann_ops/api/ -> rossmann_ops/ -> src/ -> repo root
+
+# Custom business metrics
+SALES_INFERENCE_TOTAL = Counter(
+    "sales_inference_total",
+    "Total successful sales predictions served.",
+)
+INFERENCE_ANOMALIES_BLOCKED = Counter(
+    "inference_anomalies_blocked",
+    "Total prediction requests blocked due to anomalous/poisoned input.",
+)
 
 
 @app.on_event("startup")
@@ -134,6 +148,18 @@ def predict(request: PredictRequest):
             detail="Model not available. Run 'just export-model' or ensure models/production_model exists.",
         )
 
+    # Data-poisoning defence: hard boundary on CompetitionDistance.
+    # Values above 50 km are physically implausible and indicate a malicious payload.
+    if request.CompetitionDistance is not None and request.CompetitionDistance > 50_000:
+        INFERENCE_ANOMALIES_BLOCKED.inc()
+        logger.warning(
+            f"Anomalous CompetitionDistance={request.CompetitionDistance} blocked for Store={request.Store}."
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="CompetitionDistance exceeds plausible range (>50 000m). Request blocked.",
+        )
+
     try:
         # 1. Convert request to DataFrame
         input_data = pd.DataFrame([request.model_dump()])
@@ -176,6 +202,7 @@ def predict(request: PredictRequest):
         # 5. Inference
         prediction = MODEL.predict(processed_df[feature_cols])
 
+        SALES_INFERENCE_TOTAL.inc()
         return {
             "Store": request.Store,
             "Date": request.Date,
@@ -185,7 +212,9 @@ def predict(request: PredictRequest):
 
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Inference error: {str(e)}"
+        ) from None
 
 
 @app.post("/drift-trigger")

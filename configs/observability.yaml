@@ -1,0 +1,19 @@
+demo:
+  api_url: "http://127.0.0.1:30100/predict"
+  dashboard_url: "http://127.0.0.1:30200"
+  phases:
+    normal:
+      requests: 750
+      sleep_interval_sec: 0.02
+    schema_error:
+      requests: 350
+      sleep_interval_sec: 0.02
+    attack:
+      requests: 350
+      sleep_interval_sec: 0.02
+
+infrastructure:
+  prometheus:
+    scrape_interval: "5s"
+  grafana:
+    time_window: "3m"

@@ -1,0 +1,266 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-rossmann
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  rossmann-dashboard.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": "-- Grafana --",
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "gnetId": null,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "title": "Global RPS (1m)",
+          "description": "Total requests per second across all pods and routes.",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(irate(http_requests_total[1m]))",
+              "format": "time_series",
+              "legendFormat": "RPS"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "text": {},
+            "textMode": "auto"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "fixedColor": "green", "mode": "fixed" },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 100 }
+                ]
+              },
+              "unit": "reqps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "title": "Client + Server Error Rate % (5m)",
+          "description": "Percentage of 4xx and 5xx responses. 422 anomaly blocks show here.",
+          "type": "gauge",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(rate(http_requests_total{status=~\"4..|5..\"}[5m])) / sum(rate(http_requests_total[5m])) * 100",
+              "format": "time_series",
+              "legendFormat": "Error Rate"
+            }
+          ],
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "showThresholdLabels": false,
+            "showThresholdMarkers": true
+          },
+          "fieldConfig": {
+            "defaults": {
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 5 },
+                  { "color": "red", "value": 20 }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "title": "Total Predictions Served",
+          "description": "Cumulative successful inference count across all replicas.",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(sales_inference_total)",
+              "format": "time_series",
+              "legendFormat": "Predictions"
+            }
+          ],
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "color": { "fixedColor": "blue", "mode": "fixed" }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "title": "Anomalies Blocked",
+          "description": "Cumulative count of poisoned/malicious payloads blocked by inference guard.",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "targets": [
+            {
+              "expr": "sum(inference_anomalies_blocked_total)",
+              "format": "time_series",
+              "legendFormat": "Blocked"
+            }
+          ],
+          "options": {
+            "colorMode": "background",
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 }
+                ]
+              },
+              "color": { "mode": "thresholds" }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "title": "p95 Latency (5m)",
+          "description": "95th percentile request latency aggregated across all pods.",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+              "format": "time_series",
+              "legendFormat": "p95"
+            },
+            {
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+              "format": "time_series",
+              "legendFormat": "p50 (median)"
+            }
+          ],
+          "options": {
+            "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" },
+            "tooltip": { "mode": "multi", "sort": "none" }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "opacity",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "line" }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 0.5 }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "title": "HTTP Status Distribution (5m)",
+          "description": "Breakdown of response codes. Shows 422 blocks alongside 2xx success.",
+          "type": "piechart",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "targets": [
+            {
+              "expr": "sum by (status) (rate(http_requests_total[5m]))",
+              "format": "time_series",
+              "legendFormat": "HTTP {{status}}"
+            }
+          ],
+          "options": {
+            "legend": { "displayMode": "table", "placement": "right", "showLegend": true },
+            "pieType": "donut",
+            "reduceOptions": { "calcs": ["mean"], "fields": "", "values": false },
+            "tooltip": { "mode": "single", "sort": "none" }
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 80 }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "HTTP 4xx" },
+                "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }]
+              },
+              {
+                "matcher": { "id": "byRegexp", "options": "HTTP 5.." },
+                "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+              }
+            ]
+          }
+        }
+      ],
+      "refresh": "1s",
+      "schemaVersion": 36,
+      "style": "dark",
+      "tags": ["rossmann", "mlops"],
+      "templating": { "list": [] },
+      "time": { "from": "now-15m", "to": "now" },
+      "timepicker": {},
+      "timezone": "",
+      "title": "Rossmann Store Performance",
+      "uid": "rossmann-perf",
+      "version": 2,
+      "weekStart": ""
+    }
