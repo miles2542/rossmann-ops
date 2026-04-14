@@ -166,7 +166,7 @@ with st.expander("📊 Model Diagnostics & Explainability (SHAP)", expanded=Fals
                 st.warning(
                     "SHAP plot not found on server. Ensure model was exported correctly."
                 )
-        except:
+        except Exception:
             st.error("Failed to connect to API.")
 
 # --- Hidden Settings ---

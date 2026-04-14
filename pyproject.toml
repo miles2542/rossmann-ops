@@ -27,6 +27,8 @@ dependencies = [
     "tqdm>=4.67.3",
     "shap",
     "shapash>=2.8.1",
+    "prometheus-fastapi-instrumentator>=7.1.0",
+    "prometheus-client>=0.25.0",
 ]
 
 [dependency-groups]

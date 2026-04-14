@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 import os
 import sys
@@ -180,7 +179,9 @@ def simulate_drift():
     logger.info(f"KS Statistic: {stat:.4f}, p-value: {p_value:.4e}")
 
     if p_value < P_VALUE_THRESHOLD:
-        logger.warning(f"Statistical Data Drift Detected (p-value {p_value:.4e} < {P_VALUE_THRESHOLD})!")
+        logger.warning(
+            f"Statistical Data Drift Detected (p-value {p_value:.4e} < {P_VALUE_THRESHOLD})!"
+        )
         trigger_github_workflow()
     else:
         logger.info("No significant drift detected. Model represents real-world well.")
