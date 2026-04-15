@@ -33,7 +33,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "optuna>=4.8.0",
     "pytest",
+    "rich>=14.3.3",
     "ruff",
 ]
 
