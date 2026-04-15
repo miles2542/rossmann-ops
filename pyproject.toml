@@ -29,6 +29,9 @@ dependencies = [
     "shapash>=2.8.1",
     "prometheus-fastapi-instrumentator>=7.1.0",
     "prometheus-client>=0.25.0",
+    "lightgbm>=4.6.0",
+    "numpy>=2.4.4",
+    "rich>=14.3.3",
 ]
 
 [dependency-groups]
