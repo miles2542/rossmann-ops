@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import shutil
@@ -6,156 +7,218 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import mlflow
-import mlflow.xgboost
+import mlflow.sklearn
+import numpy as np
 import pandas as pd
 import shap
-import xgboost as xgb
 import yaml
-from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from rossmann_ops.data_validation import validate_data
-from rossmann_ops.features import build_features
+from rossmann_ops.features import apply_target_encoding, build_features
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 
+def rmspe(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Root Mean Squared Percentage Error. Ignores zero-sales rows."""
+    y_true, y_pred = np.array(y_true), np.array(y_pred)
+    y_pred = np.maximum(y_pred, 1.0)
+    mask = y_true != 0
+    return float(np.sqrt(np.mean(((y_true[mask] - y_pred[mask]) / y_true[mask]) ** 2)))
+
+
 def train_production_model() -> None:
-    # 1. Setup paths and load config
-    project_root = Path(
-        __file__
-    ).parent.parent.parent  # src/rossmann_ops/ -> src/ -> repo root
+    # 1. Load config
+    project_root = Path(__file__).parent.parent.parent
     config_path = project_root / "configs" / "params.yaml"
     with open(config_path, "r") as f:
-        params = yaml.safe_load(f)
+        config = yaml.safe_load(f)
 
-    # 2. Load and Validate Data
+    rs = config["train"]["random_state"]
+    prod_cfg = config["model"]["production"]
+    split_cfg = config["data_split"]
+    ohe_cols = config["features"]["ohe_expected_columns"]
+
+    # 2. Load and Validate Raw Data
     logger.info("Loading raw data...")
-    train_df = pd.read_csv(params["data"]["raw_train"], low_memory=False)
-    store_df = pd.read_csv(params["data"]["raw_store"])
+    train_df = pd.read_csv(project_root / config["data"]["raw_train"], low_memory=False)
+    store_df = pd.read_csv(project_root / config["data"]["raw_store"])
     df = pd.merge(train_df, store_df, on="Store", how="left")
-
-    # Initial validation
     df = validate_data(df)
 
-    # 3. Feature Engineering
-    # Calculate competition fill value once from training distribution
-    competition_fill = df["CompetitionDistance"].max() * 2
-    logger.info(f"Using competition_distance_fill: {competition_fill}")
-
-    # Build features
-    df = build_features(df, fill_value=competition_fill)
-
-    # 4. Filter and Split
-    # Production model only trained on open days with sales > 0
+    # 3. Filter: open days with sales > 0 only
     df = df[(df["Open"] == 1) & (df["Sales"] > 0)].copy()
 
-    # Define features (Maianh's expanded feature set)
-    # We include our new time features and handle categorical encoding via XGBoost
-    features = [
-        "Store",
+    # 4. Chronological Sort & Strict Data Split
+    df["Date"] = pd.to_datetime(df["Date"])
+    df.sort_values("Date", inplace=True, ignore_index=True)
+
+    max_date = df["Date"].max()
+    sim_cutoff = max_date - pd.Timedelta(days=split_cfg["simulation_days"])
+    holdout_cutoff = sim_cutoff - pd.Timedelta(days=split_cfg["holdout_days"])
+
+    # Simulation set is never touched during training or evaluation
+    df_cv = df[df["Date"] <= holdout_cutoff].copy()
+    df_holdout = df[(df["Date"] > holdout_cutoff) & (df["Date"] <= sim_cutoff)].copy()
+
+    logger.info(
+        "Split complete. CV: %d rows, Holdout: %d rows, Sim set excluded: %d rows.",
+        len(df_cv),
+        len(df_holdout),
+        len(df[df["Date"] > sim_cutoff]),
+    )
+
+    # 5. Compute train-set statistics for leak-free transformations
+    train_comp_median = df_cv["CompetitionDistance"].median()
+    logger.info("Train CompetitionDistance median: %.2f", train_comp_median)
+
+    # 6. Apply Stateless Feature Engineering
+    # Pass ohe_cols to both slices so column alignment is enforced regardless
+    # of which holiday categories appear within each time window.
+    df_cv = build_features(
+        df_cv, train_comp_median=train_comp_median, expected_ohe_cols=ohe_cols
+    )
+    df_holdout = build_features(
+        df_holdout, train_comp_median=train_comp_median, expected_ohe_cols=ohe_cols
+    )
+
+    # 7. Expanding Mean Target Encoding on df_cv only.
+    # Expanding mean uses only past observations per store — zero leakage.
+    df_cv["Store_TargetMean"] = df_cv.groupby("Store")["Sales"].transform(
+        lambda x: x.shift().expanding().mean()
+    )
+    global_mean = float(df_cv["Sales"].mean())
+    df_cv["Store_TargetMean"] = df_cv["Store_TargetMean"].fillna(global_mean)
+
+    # Save final per-store means: one lookup value per store for inference
+    final_store_means: dict[int, float] = (
+        df_cv.groupby("Store")["Sales"].mean().to_dict()
+    )
+    # Apply to holdout using training-set means (no future peek)
+    df_holdout = apply_target_encoding(df_holdout, final_store_means, global_mean)
+
+    # 8. Define Feature Columns
+    feature_cols = [
         "DayOfWeek",
         "Promo",
         "Year",
         "Month",
-        "Day",
         "WeekOfYear",
-        "CompetitionDistance",
-        "CompetitionOpenSinceMonth",
-        "CompetitionOpenSinceYear",
-    ]
-    target = params["features"]["target"]
+        "LogCompDist",
+        "Store_TargetMean",
+    ] + ohe_cols
 
-    X = df[features]
-    y = df[target]
+    X_cv = df_cv[feature_cols]
+    y_cv_log = np.log1p(df_cv["Sales"])
+    X_holdout = df_holdout[feature_cols]
+    y_holdout = df_holdout["Sales"].to_numpy()
 
-    # Handle basic categorical types for XGBoost if needed (StateHoliday, StoreType, etc.)
-    # For simplicity in this step, we use numerical ones + Store
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=params["train"]["test_size"],
-        random_state=params["train"]["random_state"],
-    )
+    # 9. Persist Target Encoding Artifact
+    target_means_path = project_root / config["model"]["target_means_path"]
+    target_means_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(target_means_path, "w") as f:
+        json.dump({"store_means": final_store_means, "global_mean": global_mean}, f)
+    logger.info("Store target means saved to %s.", target_means_path)
 
-    # 5. MLflow Tracking & Training
+    # 10. MLflow Training Run
     mlflow.set_tracking_uri(
-        os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db")
+        os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{project_root}/mlruns/mlflow.db")
     )
-    mlflow.set_experiment("Rossmann_Production")
-    # Disable autologging the model to avoid duplicate with manual log_model below
-    mlflow.xgboost.autolog(log_models=False)
+    mlflow.set_experiment(config["train"]["experiment_name"])
+    mlflow.sklearn.autolog(log_models=False)
 
     with mlflow.start_run() as run:
-        # Log custom parameter for fill value
-        mlflow.log_param("competition_distance_fill", competition_fill)
-
-        logger.info("Starting XGBoost training...")
-        # Simple XGBoost regressor for production iteration
-        model = xgb.XGBRegressor(
-            n_estimators=100,
-            learning_rate=0.1,
-            max_depth=7,
-            random_state=params["train"]["random_state"],
-            tree_method="hist",  # for performance
+        # Log configuration
+        mlflow.log_params(
+            {
+                "model_type": config["model"]["type"],
+                "n_estimators": prod_cfg["n_estimators"],
+                "max_depth": prod_cfg["max_depth"],
+                "min_samples_split": prod_cfg["min_samples_split"],
+                "random_state": rs,
+                "holdout_days": split_cfg["holdout_days"],
+                "simulation_days": split_cfg["simulation_days"],
+                "n_cv_rows": len(X_cv),
+                "train_comp_median": train_comp_median,
+            }
         )
 
-        # Passing eval_set allows XGBoost autolog to capture training/validation learning curves
-        model.fit(
-            X_train,
-            y_train,
-            eval_set=[(X_train, y_train), (X_test, y_test)],
-            verbose=False,
+        logger.info("Starting Random Forest training...")
+        model = RandomForestRegressor(
+            n_estimators=prod_cfg["n_estimators"],
+            max_depth=prod_cfg["max_depth"],
+            min_samples_split=prod_cfg["min_samples_split"],
+            random_state=rs,
+            n_jobs=-1,
         )
 
-        # 5.5 Calculate and Log Explicit Metrics
-        import numpy as np
-        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+        # Cast to float64 for consistent MLflow schema and API type-resilience
+        X_cv_train = X_cv.astype(np.float64)
+        model.fit(X_cv_train, y_cv_log)
 
-        logger.info("Calculating evaluation metrics...")
-        preds = model.predict(X_test)
-        rmse = np.sqrt(mean_squared_error(y_test, preds))
-        mae = mean_absolute_error(y_test, preds)
-        r2 = r2_score(y_test, preds)
+        # 11. Holdout Evaluation in Real Sales Space
+        logger.info("Evaluating on holdout set...")
+        X_holdout_test = X_holdout.astype(np.float64)
+        preds_log = model.predict(X_holdout_test)
+        preds = np.expm1(preds_log)
 
-        mlflow.log_metrics({"rmse": rmse, "mae": mae, "r2": r2})
+        holdout_rmspe = rmspe(y_holdout, preds)
+        holdout_rmse = float(np.sqrt(mean_squared_error(y_holdout, preds)))
+        holdout_mae = float(mean_absolute_error(y_holdout, preds))
+        holdout_r2 = float(r2_score(y_holdout, preds))
 
-        # 6. Explainability (SHAP)
+        mlflow.log_metrics(
+            {
+                "holdout_rmspe": holdout_rmspe,
+                "holdout_rmse": holdout_rmse,
+                "holdout_mae": holdout_mae,
+                "holdout_r2": holdout_r2,
+            }
+        )
+        logger.info(
+            "Holdout: RMSPE=%.4f, RMSE=%.2f, MAE=%.2f, R2=%.4f",
+            holdout_rmspe,
+            holdout_rmse,
+            holdout_mae,
+            holdout_r2,
+        )
+
+        # 12. SHAP Explainability (sample for speed)
         logger.info("Generating SHAP summary plot...")
         explainer = shap.TreeExplainer(model)
-        # Sample for speed in logging
-        sample_X = X_test.sample(min(1000, len(X_test)), random_state=42)
+        sample_X = X_cv.sample(min(500, len(X_cv)), random_state=rs)
         shap_values = explainer.shap_values(sample_X)
 
         plt.figure(figsize=(10, 6))
         shap.summary_plot(shap_values, sample_X, show=False)
         plt.tight_layout()
 
-        # Use system's native temporary directory for absolute robustness (CI/CD safe)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            shap_tmp_path = os.path.join(tmp_dir, "shap_summary.png")
-            plt.savefig(shap_tmp_path)
-            mlflow.log_artifact(shap_tmp_path)
-
+        shap_out_path = project_root / "models" / "shap_summary.png"
+        shap_out_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(shap_out_path)
         plt.close()
 
-        # 7. Explicit Model Logging (Custom name used by API/Export scripts)
-        mlflow.xgboost.log_model(model, "production_model")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            shap_tmp = os.path.join(tmp_dir, "shap_summary.png")
+            plt.savefig(shap_tmp) if False else shutil.copy(shap_out_path, shap_tmp)
+            mlflow.log_artifact(shap_tmp)
 
-        # 8. Save model locally so CI/CD pipeline and Docker builds don't need
-        #    a separate network round-trip back to the MLflow artifact store.
-        #    export_model.py remains available as a LOCAL utility to pull any
-        #    historical run by ID without retraining.
-        local_model_dir = project_root / "models" / "production_model"
+        # 13. Log Model to MLflow Registry
+        mlflow.sklearn.log_model(model, name="production_model")
+
+        # 14. Save Model Locally for Docker/CI builds
+        local_model_dir = project_root / config["model"]["save_path"]
         if local_model_dir.exists():
             shutil.rmtree(local_model_dir)
-        mlflow.xgboost.save_model(model, str(local_model_dir))
-        logger.info(f"Model saved locally to {local_model_dir}")
+        mlflow.sklearn.save_model(model, str(local_model_dir))
+        logger.info("Model saved to %s.", local_model_dir)
 
-        logger.info(f"Production training complete. Run ID: {run.info.run_id}")
+        logger.info("Training complete. Run ID: %s", run.info.run_id)
 
 
 if __name__ == "__main__":

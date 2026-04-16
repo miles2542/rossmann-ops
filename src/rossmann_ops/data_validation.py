@@ -26,6 +26,8 @@ class RossmannSchema(pa.DataFrameModel):
     Promo: Series[int] = pa.Field(isin=[0, 1])
     StateHoliday: Optional[Series[str]] = pa.Field(nullable=True)
     SchoolHoliday: Optional[Series[int]] = pa.Field(isin=[0, 1], nullable=True)
+    StoreType: Optional[Series[str]] = pa.Field(nullable=True)
+    Assortment: Optional[Series[str]] = pa.Field(nullable=True)
 
     class Config:
         """Schema configuration."""
