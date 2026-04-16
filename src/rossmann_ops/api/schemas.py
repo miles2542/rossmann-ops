@@ -39,8 +39,8 @@ class PredictRequest(BaseModel):
         description="Distance in meters to nearest competitor. Defaults to store dataset value.",
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "Store": 1,
                 "DayOfWeek": 5,
@@ -52,6 +52,7 @@ class PredictRequest(BaseModel):
                 "CompetitionDistance": 1270.0,
             }
         }
+    }
 
 
 class PredictResponse(BaseModel):

@@ -27,7 +27,7 @@ format:
 	uv run ruff format .
 
 test:
-	uv run pytest tests/ -v
+	uv run pytest tests/ -v --cov=src --cov-report=term-missing
 
 train-prod:
 	uv run python -m rossmann_ops.train_model

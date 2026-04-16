@@ -131,9 +131,7 @@ with col_form:
         help="Assortment level (a=basic, b=extra, c=extended)",
     )
 
-    submitted = st.button(
-        "Generate Forecast", type="primary", use_container_width=True
-    )
+    submitted = st.button("Generate Forecast", type="primary", use_container_width=True)
 
 with col_result:
     st.subheader("Prediction Result")
