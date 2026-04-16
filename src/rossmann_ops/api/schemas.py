@@ -36,7 +36,6 @@ class PredictRequest(BaseModel):
     CompetitionDistance: Optional[float] = Field(
         None,
         ge=0,
-        le=50_000,
         description="Distance in meters to nearest competitor. Defaults to store dataset value.",
     )
 

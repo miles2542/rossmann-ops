@@ -87,3 +87,9 @@ deploy-all: \
 
 mlflow-ui:
 	uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
+
+k8s-update:
+	just build-api
+	just build-ui
+	just k8s-load
+	-kubectl rollout restart deployment rossmann-api rossmann-ui

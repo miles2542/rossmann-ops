@@ -16,6 +16,25 @@ st.set_page_config(
 if "api_url" not in st.session_state:
     st.session_state.api_url = os.getenv("API_URL", "http://localhost:8000")
 
+if "store_meta" not in st.session_state:
+    st.session_state.store_meta = {
+        "StoreType": "c",
+        "Assortment": "a",
+        "CompetitionDistance": 1270.0,
+    }
+
+
+def fetch_store_metadata():
+    """Triggered when Store ID changes to pre-populate metadata widgets."""
+    sid = st.session_state.get("store_id_input", 1)
+    try:
+        url = f"{st.session_state.api_url}/store/{sid}"
+        r = requests.get(url, timeout=2)
+        if r.status_code == 200:
+            st.session_state.store_meta = r.json()
+    except Exception:
+        pass  # Fallback to existing session state if API fails
+
 
 def check_backend_health():
     try:
@@ -58,53 +77,63 @@ col_form, col_result = st.columns([1.5, 1], gap="large")
 
 with col_form:
     st.subheader("Forecast Parameters")
-    with st.form("forecast_form"):
-        # High-density input grid
-        c1, c2, c3 = st.columns(3)
-        store_id = c1.number_input(
-            "Store ID", min_value=1, value=1, help="Unique store identifier"
-        )
-        forecast_date = c2.date_input("Date", value=date.today())
+    # High-density input grid
+    c1, c2 = st.columns(2)
+    store_id = c1.number_input(
+        "Store ID",
+        min_value=1,
+        value=1,
+        key="store_id_input",
+        on_change=fetch_store_metadata,
+        help="Unique store identifier",
+    )
+    forecast_date = c2.date_input("Date", value=date.today())
 
-        # Streamlit dates default to Monday=0, we match standard 1=Mon, 7=Sun
-        default_dow = forecast_date.weekday() + 1
+    # Streamlit dates default to Monday=0, we match standard 1=Mon, 7=Sun
+    default_dow = forecast_date.weekday() + 1
 
-        day_of_week = c3.selectbox(
-            "Day of Week",
-            options=[1, 2, 3, 4, 5, 6, 7],
-            index=default_dow - 1,
-            format_func=lambda x: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][
-                x - 1
-            ],
-        )
+    c4, c5, c6 = st.columns(3)
+    promo = c4.selectbox(
+        "Promo Active",
+        options=[1, 0],
+        format_func=lambda x: "Yes" if x == 1 else "No",
+    )
+    holiday = c5.selectbox(
+        "State Holiday",
+        options=["0", "a", "b", "c"],
+        format_func=lambda x: {
+            "0": "None",
+            "a": "Public",
+            "b": "Easter",
+            "c": "Christmas",
+        }[x],
+    )
+    comp_dist = c6.number_input(
+        "Comp. Distance (m)",
+        min_value=0.0,
+        value=float(st.session_state.store_meta["CompetitionDistance"]),
+        step=100.0,
+        help="Distance to nearest competitor. Auto-fetched from store data.",
+    )
 
-        c4, c5, c6 = st.columns(3)
-        promo = c4.selectbox(
-            "Promo Active",
-            options=[1, 0],
-            format_func=lambda x: "Yes" if x == 1 else "No",
-        )
-        holiday = c5.selectbox(
-            "State Holiday",
-            options=["0", "a", "b", "c"],
-            format_func=lambda x: {
-                "0": "None",
-                "a": "Public",
-                "b": "Easter",
-                "c": "Christmas",
-            }[x],
-        )
-        comp_dist = c6.number_input(
-            "Comp. Distance (m)",
-            min_value=0.0,
-            value=0.0,
-            step=100.0,
-            help="Distance to nearest competitor. Leave 0 to use stored default.",
-        )
+    # New metadata dropdowns for model inputs
+    c7, c8 = st.columns(2)
+    store_type = c7.selectbox(
+        "Store Type",
+        options=["a", "b", "c", "d"],
+        index=["a", "b", "c", "d"].index(st.session_state.store_meta["StoreType"]),
+        help="Category for store type (a, b, c, or d)",
+    )
+    assortment = c8.selectbox(
+        "Assortment",
+        options=["a", "b", "c"],
+        index=["a", "b", "c"].index(st.session_state.store_meta["Assortment"]),
+        help="Assortment level (a=basic, b=extra, c=extended)",
+    )
 
-        submitted = st.form_submit_button(
-            "Generate Forecast", type="primary", use_container_width=True
-        )
+    submitted = st.button(
+        "Generate Forecast", type="primary", use_container_width=True
+    )
 
 with col_result:
     st.subheader("Prediction Result")
@@ -122,10 +151,12 @@ with col_result:
         else:
             payload = {
                 "Store": int(store_id),
-                "DayOfWeek": int(day_of_week),
+                "DayOfWeek": int(default_dow),
                 "Date": forecast_date.isoformat(),
                 "Promo": int(promo),
                 "StateHoliday": holiday,
+                "StoreType": store_type,
+                "Assortment": assortment,
                 "CompetitionDistance": comp_dist if comp_dist > 0 else None,
             }
 
@@ -161,7 +192,7 @@ with st.expander("📊 Model Diagnostics & Explainability (SHAP)", expanded=Fals
         try:
             r = requests.get(shap_url)
             if r.status_code == 200:
-                st.image(r.content, use_column_width=True)
+                st.image(r.content, use_container_width=True)
             else:
                 st.warning(
                     "SHAP plot not found on server. Ensure model was exported correctly."
