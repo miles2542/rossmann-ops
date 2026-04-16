@@ -8,10 +8,16 @@ check-docker:
 
 setup:
 	uv sync
-	dvc pull -f
+	just pull
 
 install:
 	uv sync
+
+pull:
+	dvc pull
+
+push:
+	dvc push
 
 lint *args:
 	uv run ruff check . {{args}}
