@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import mlflow.sklearn
@@ -21,17 +22,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for handling startup/shutdown logic."""
+    load_artifacts()
+    yield
+
+
 app = FastAPI(
     title="Rossmann Sales Forecasting API",
     description="Production API for predicting store sales using a Random Forest model.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 Instrumentator().instrument(
     app,
     latency_highr_buckets=(
-        0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0
-    )
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.075,
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+        7.5,
+        10.0,
+    ),
 ).expose(app)
 
 # Global artifacts
@@ -52,7 +75,6 @@ INFERENCE_ANOMALIES_BLOCKED = Counter(
 )
 
 
-@app.on_event("startup")
 def load_artifacts():
     global MODEL, STORE_DF, STORE_MEANS, GLOBAL_MEAN
 

@@ -62,11 +62,8 @@ def build_features(
 
     # 3. Competition Distance: log-transform with train-median imputation
     if "CompetitionDistance" in df.columns:
-        df["LogCompDist"] = np.log1p(
-            df["CompetitionDistance"]
-            .fillna(train_comp_median)
-            .infer_objects(copy=False)
-        )
+        dist = pd.to_numeric(df["CompetitionDistance"], errors="coerce")
+        df["LogCompDist"] = np.log1p(dist.fillna(train_comp_median))
 
     # 4. OHE Column Alignment (inference mode)
     # Ensures single-row payloads have the same feature space as training.
