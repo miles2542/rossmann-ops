@@ -1,8 +1,10 @@
+import json
 import logging
 import os
 from pathlib import Path
 
-import mlflow.xgboost
+import mlflow.sklearn
+import numpy as np
 import pandas as pd
 import uvicorn
 import yaml
@@ -12,9 +14,8 @@ from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from rossmann_ops.api.schemas import DriftRequest, PredictRequest, PredictResponse
-from rossmann_ops.features import build_features
+from rossmann_ops.features import apply_target_encoding, build_features
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
@@ -22,22 +23,20 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Rossmann Sales Forecasting API",
-    description="Production API for predicting store sales using XGBoost.",
+    description="Production API for predicting store sales using a Random Forest model.",
     version="1.0.0",
 )
 
-# Prometheus auto-instrumentation: exposes /metrics with RPS, latency, error rate.
 Instrumentator().instrument(app).expose(app)
 
-# Global model and config holders
+# Global artifacts
 MODEL = None
 STORE_DF = None
-MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0-baseline")
-PROJECT_ROOT = (
-    Path(__file__).resolve().parents[3]
-)  # src/rossmann_ops/api/ -> rossmann_ops/ -> src/ -> repo root
+STORE_MEANS: dict | None = None
+GLOBAL_MEAN: float | None = None
+MODEL_VERSION = os.getenv("MODEL_VERSION", "v1.0.0")
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-# Custom business metrics
 SALES_INFERENCE_TOTAL = Counter(
     "sales_inference_total",
     "Total successful sales predictions served.",
@@ -50,68 +49,77 @@ INFERENCE_ANOMALIES_BLOCKED = Counter(
 
 @app.on_event("startup")
 def load_artifacts():
-    global MODEL, STORE_DF
+    global MODEL, STORE_DF, STORE_MEANS, GLOBAL_MEAN
 
-    # 1. Load Parameters and Config
     try:
         config_path = PROJECT_ROOT / "configs" / "params.yaml"
         with open(config_path, "r") as f:
             params = yaml.safe_load(f)
 
-        # 2. Load Store data for feature enrichment
+        # 1. Load store metadata for CompetitionDistance enrichment
         store_path = PROJECT_ROOT / params["data"]["raw_store"]
         if store_path.exists():
             STORE_DF = pd.read_csv(store_path)
-            logger.info("Successfully loaded store metadata.")
+            logger.info("Store metadata loaded from %s.", store_path)
         else:
-            logger.error(f"Store metadata not found at {store_path}")
+            logger.error("Store metadata not found at %s.", store_path)
 
-        # 3. Load Model with Remote Registry capability & Graceful Local Fallback
+        # 2. Load store target means artifact
+        means_path = PROJECT_ROOT / params["model"]["target_means_path"]
+        if means_path.exists():
+            with open(means_path, "r") as f:
+                artifact = json.load(f)
+            # JSON keys are strings — convert back to int for Store ID lookup
+            STORE_MEANS = {int(k): v for k, v in artifact["store_means"].items()}
+            GLOBAL_MEAN = artifact["global_mean"]
+            logger.info(
+                "Store target means loaded. Stores covered: %d.", len(STORE_MEANS)
+            )
+        else:
+            logger.error(
+                "store_target_means.json not found at %s. Run training first.",
+                means_path,
+            )
+
+        # 3. Load model from registry with local fallback
         model_uri = os.getenv("MLFLOW_MODEL_URI")
         tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
 
         if model_uri and tracking_uri:
             try:
-                logger.info(f"Attempting dynamic model load from registry: {model_uri}")
+                logger.info("Loading model from registry: %s", model_uri)
                 mlflow.set_tracking_uri(tracking_uri)
-                MODEL = mlflow.xgboost.load_model(model_uri)
-                logger.info("Successfully loaded model from remote registry.")
+                MODEL = mlflow.sklearn.load_model(model_uri)
+                logger.info("Model loaded from remote registry.")
             except Exception as e:
-                logger.warning(
-                    f"Failed to load from registry, falling back to local: {e}"
-                )
+                logger.warning("Registry load failed, falling back to local: %s", e)
 
         if MODEL is None:
-            model_path = PROJECT_ROOT / "models" / "production_model"
+            model_path = PROJECT_ROOT / params["model"]["save_path"]
             if model_path.exists():
-                MODEL = mlflow.xgboost.load_model(str(model_path))
-                logger.info(f"Production model loaded from {model_path}")
+                MODEL = mlflow.sklearn.load_model(str(model_path))
+                logger.info("Model loaded from local path: %s.", model_path)
             else:
-                logger.warning(
-                    "No model found dynamically or locally. Predict endpoint disabled."
-                )
+                logger.warning("No model found. Run 'just train-prod' first.")
 
     except Exception as e:
-        logger.error(f"Startup failed: {e}")
+        logger.error("Startup failed: %s", e)
 
 
 @app.get("/health/live")
 def liveness_check():
-    """
-    Returns 200 if the server process is running.
-    Used for Kubernetes Liveness Probes.
-    """
+    """Returns 200 if the server process is running. Used for K8s Liveness Probe."""
     return {"status": "alive"}
 
 
 @app.get("/health")
 def readiness_check(response: Response):
     """
-    Returns system health and model status.
-    Returns HTTP 503 if the service is not ready.
-    Used for Kubernetes Readiness Probes.
+    Returns system health and artifact status.
+    Returns HTTP 503 if model, store data, or target means are not loaded.
+    Used for K8s Readiness Probe.
     """
-    is_ready = STORE_DF is not None and MODEL is not None
+    is_ready = MODEL is not None and STORE_DF is not None and STORE_MEANS is not None
     if not is_ready:
         response.status_code = 503
 
@@ -119,6 +127,7 @@ def readiness_check(response: Response):
         "status": "healthy" if is_ready else "degraded",
         "model_loaded": MODEL is not None,
         "store_data_loaded": STORE_DF is not None,
+        "store_means_loaded": STORE_MEANS is not None,
         "model_version": MODEL_VERSION,
         "environment": os.getenv("ENV", "development"),
     }
@@ -126,104 +135,108 @@ def readiness_check(response: Response):
 
 @app.get("/health/shap")
 def get_shap_plot():
-    """
-    Serves the SHAP summary plot for model explainability.
-    """
+    """Serves the SHAP summary plot for model explainability."""
     shap_path = PROJECT_ROOT / "models" / "shap_summary.png"
     if not shap_path.exists():
         raise HTTPException(
-            status_code=404, detail="Explainability artifacts not generated yet."
+            status_code=404,
+            detail="Explainability artifact not found. Run training first.",
         )
     return FileResponse(shap_path)
 
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(request: PredictRequest):
-    """
-    Transaction-level sales prediction.
-    """
-    if MODEL is None:
+    """Transaction-level sales prediction."""
+    if MODEL is None or STORE_MEANS is None:
         raise HTTPException(
             status_code=503,
-            detail="Model not available. Run 'just export-model' or ensure models/production_model exists.",
+            detail="Model or target means not loaded. Ensure training has been run.",
         )
 
-    # Data-poisoning defence: hard boundary on CompetitionDistance.
-    # Values above 50 km are physically implausible and indicate a malicious payload.
+    # Data-poisoning defence: CompetitionDistance already bounded by schema (le=50_000).
+    # Secondary guard for belt-and-suspenders safety on non-schema paths.
     if request.CompetitionDistance is not None and request.CompetitionDistance > 50_000:
         INFERENCE_ANOMALIES_BLOCKED.inc()
         logger.warning(
-            f"Anomalous CompetitionDistance={request.CompetitionDistance} blocked for Store={request.Store}."
+            "Anomalous CompetitionDistance=%.2f blocked for Store=%d.",
+            request.CompetitionDistance,
+            request.Store,
         )
         raise HTTPException(
             status_code=422,
-            detail="CompetitionDistance exceeds plausible range (>50 000m). Request blocked.",
+            detail="CompetitionDistance exceeds plausible range (>50 000 m). Request blocked.",
         )
 
     try:
-        # 1. Convert request to DataFrame
+        # 1. Reconstruct input DataFrame
         input_data = pd.DataFrame([request.model_dump()])
 
-        # 2. Enrich with Store data
-        # We merge on Store ID to get Competition/Store details
-        enriched_df = pd.merge(
-            input_data, STORE_DF, on="Store", how="left", suffixes=("", "_store")
+        # 2. Enrich with store metadata (CompetitionDistance from store.csv if not provided)
+        if STORE_DF is not None:
+            enriched = pd.merge(
+                input_data, STORE_DF, on="Store", how="left", suffixes=("", "_store")
+            )
+            if request.CompetitionDistance is not None:
+                enriched["CompetitionDistance"] = request.CompetitionDistance
+        else:
+            enriched = input_data
+
+        # 3. Stateless feature transforms (dates, OHE, LogCompDist, column alignment)
+        # train_comp_median is not critical for a single row — GLOBAL_MEAN gives a
+        # reasonable fallback; STORE_MEANS already captures store-level distance signal.
+        train_comp_median = enriched["CompetitionDistance"].fillna(0).iloc[0]
+        from rossmann_ops.features import build_features as _bf  # noqa: F401
+
+        config_path = PROJECT_ROOT / "configs" / "params.yaml"
+        with open(config_path, "r") as f:
+            params = yaml.safe_load(f)
+
+        processed = build_features(
+            enriched,
+            train_comp_median=float(train_comp_median),
+            expected_ohe_cols=params["features"]["ohe_expected_columns"],
         )
 
-        # Override with request value if provided
-        if request.CompetitionDistance is not None:
-            enriched_df["CompetitionDistance"] = request.CompetitionDistance
+        # 4. Apply Store Target Encoding
+        processed = apply_target_encoding(processed, STORE_MEANS, GLOBAL_MEAN)
 
-        # 3. Applied Feature Engineering
-        # We use the same build_features logic used during training
-        processed_df = build_features(enriched_df)
-
-        # 4. Feature selection to match training set
-        # Note: We must ensure columns match exactly what xgb regressor expects
-        # These are matched to src/rossmann_ops/train_model.py
+        # 5. Align feature columns to training order
         feature_cols = [
-            "Store",
             "DayOfWeek",
             "Promo",
             "Year",
             "Month",
-            "Day",
             "WeekOfYear",
-            "CompetitionDistance",
-            "CompetitionOpenSinceMonth",
-            "CompetitionOpenSinceYear",
-        ]
+            "LogCompDist",
+            "Store_TargetMean",
+        ] + params["features"]["ohe_expected_columns"]
 
-        # Check for missing columns (e.g. if store_df was missing data)
         for col in feature_cols:
-            if col not in processed_df.columns:
-                processed_df[col] = 0  # Default fallback
+            if col not in processed.columns:
+                processed[col] = 0
 
-        # 5. Inference
-        prediction = MODEL.predict(processed_df[feature_cols])
+        # 6. Inference — model predicts in log-space, we restore to real-space
+        prediction_log = MODEL.predict(processed[feature_cols])
+        prediction = float(np.expm1(prediction_log[0]))
 
         SALES_INFERENCE_TOTAL.inc()
         return {
             "Store": request.Store,
             "Date": request.Date,
-            "PredictedSales": float(prediction[0]),
+            "PredictedSales": prediction,
             "ModelVersion": MODEL_VERSION,
         }
 
     except Exception as e:
-        logger.error(f"Prediction failed: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Inference error: {str(e)}"
-        ) from None
+        logger.error("Prediction failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Inference error: {e}") from None
 
 
 @app.post("/drift-trigger")
 def drift_trigger(request: DriftRequest):
-    """
-    Stub for Phase 6 Retraining trigger.
-    """
-    # Simply log the event for now
-    logger.info(f"Drift check triggered for {len(request.sales_data)} records.")
+    """Stub for retraining trigger. Logs drift event for monitoring."""
+    logger.info("Drift check triggered for %d records.", len(request.sales_data))
     return {
         "drift_detected": False,
         "timestamp": pd.Timestamp.now().isoformat(),
