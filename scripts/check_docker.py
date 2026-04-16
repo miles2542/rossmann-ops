@@ -1,4 +1,5 @@
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -24,7 +25,8 @@ def start_docker_desktop():
     logger.info("Docker not running. Attempting to start Docker Desktop...")
 
     if platform == "win32":
-        docker_path = Path(r"C:\Program Files\Docker\Docker\Docker Desktop.exe")
+        prog_files = os.environ.get("ProgramFiles", "C:\\Program Files")
+        docker_path = Path(prog_files) / "Docker" / "Docker" / "Docker Desktop.exe"
         if docker_path.exists():
             subprocess.Popen([str(docker_path)])
         else:

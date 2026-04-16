@@ -250,5 +250,7 @@ models/**
 *.pkl
 *.onnx
 *.ubj
+mlflow.db
+.coverage
 .ipynb_checkpoints/
 
