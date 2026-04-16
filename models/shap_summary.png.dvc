@@ -1,0 +1,5 @@
+outs:
+- md5: 9eb217f0cda7450874a0a815763ea1c9
+  size: 78922
+  hash: md5
+  path: shap_summary.png
