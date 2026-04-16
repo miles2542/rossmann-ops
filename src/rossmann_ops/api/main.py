@@ -27,7 +27,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
-Instrumentator().instrument(app).expose(app)
+Instrumentator().instrument(
+    app,
+    latency_highr_buckets=(
+        0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0
+    )
+).expose(app)
 
 # Global artifacts
 MODEL = None
@@ -143,6 +148,26 @@ def get_shap_plot():
             detail="Explainability artifact not found. Run training first.",
         )
     return FileResponse(shap_path)
+    
+    
+@app.get("/store/{store_id}")
+def get_store_metadata(store_id: int):
+    """Fetches static store metadata (Type, Assortment, Distance) for UI pre-filling."""
+    if STORE_DF is None:
+        raise HTTPException(status_code=503, detail="Store metadata not loaded.")
+
+    store_data = STORE_DF[STORE_DF["Store"] == store_id]
+    if store_data.empty:
+        raise HTTPException(status_code=404, detail=f"Store ID {store_id} not found.")
+
+    row = store_data.iloc[0]
+    return {
+        "StoreType": str(row["StoreType"]),
+        "Assortment": str(row["Assortment"]),
+        "CompetitionDistance": float(row["CompetitionDistance"])
+        if pd.notnull(row["CompetitionDistance"])
+        else 0.0,
+    }
 
 
 @app.post("/predict", response_model=PredictResponse)
@@ -154,9 +179,12 @@ def predict(request: PredictRequest):
             detail="Model or target means not loaded. Ensure training has been run.",
         )
 
-    # Data-poisoning defence: CompetitionDistance already bounded by schema (le=50_000).
+    # Data-poisoning defence: CompetitionDistance already bounded by schema (le=100_000).
     # Secondary guard for belt-and-suspenders safety on non-schema paths.
-    if request.CompetitionDistance is not None and request.CompetitionDistance > 50_000:
+    if (
+        request.CompetitionDistance is not None
+        and request.CompetitionDistance > 100_000
+    ):
         INFERENCE_ANOMALIES_BLOCKED.inc()
         logger.warning(
             "Anomalous CompetitionDistance=%.2f blocked for Store=%d.",
@@ -165,7 +193,7 @@ def predict(request: PredictRequest):
         )
         raise HTTPException(
             status_code=422,
-            detail="CompetitionDistance exceeds plausible range (>50 000 m). Request blocked.",
+            detail="CompetitionDistance exceeds plausible range (>100 000 m). Request blocked.",
         )
 
     try:
