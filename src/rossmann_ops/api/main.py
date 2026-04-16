@@ -148,8 +148,8 @@ def get_shap_plot():
             detail="Explainability artifact not found. Run training first.",
         )
     return FileResponse(shap_path)
-    
-    
+
+
 @app.get("/store/{store_id}")
 def get_store_metadata(store_id: int):
     """Fetches static store metadata (Type, Assortment, Distance) for UI pre-filling."""
