@@ -51,7 +51,7 @@ jobs:
 
       # Strict: a failing test DOES block train + build jobs
       - name: Run tests
-        run: uv run pytest tests/ -v
+        run: uv run pytest tests/ -v --cov=src --cov-report=term-missing
 
   # ─── Job 2: Train & Export ─────────────────────────────────────────────────
   # Runs on: push to main (or tag), repository_dispatch (CT from drift)
