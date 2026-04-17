@@ -90,6 +90,16 @@ deploy-all: \
 	setup-prod \
 	k8s-monitoring-setup \
 	k8s-apply-monitors
+	@echo ""
+	@echo "  Full stack deployed. Allow 30-60s for pods to stabilize."
+	@echo ""
+	@echo "  Open in browser:"
+	@echo "    Streamlit UI  ->  http://localhost:30000"
+	@echo "    API Docs      ->  http://localhost:30100/docs"
+	@echo "    API Health    ->  http://localhost:30100/health"
+	@echo "    Grafana       ->  http://localhost:30200  (admin / prom-operator)"
+	@echo "    Prometheus    ->  http://localhost:30300"
+	@echo ""
 
 mlflow-ui:
 	uv run mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db
@@ -99,3 +109,50 @@ k8s-update:
 	just build-ui
 	just k8s-load
 	-kubectl rollout restart deployment rossmann-api rossmann-ui
+
+# ── Local development servers (no Docker, no K8s) ──────────────────────────
+
+serve-api:
+	@echo ""
+	@echo "  Starting FastAPI inference server ..."
+	@echo "  Once running, open:  http://localhost:8000/docs"
+	@echo ""
+	uv run uvicorn rossmann_ops.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+serve-ui:
+	@echo ""
+	@echo "  Starting Streamlit dashboard ..."
+	@echo "  Once running, open:  http://localhost:8501"
+	@echo ""
+	uv run streamlit run ui/app.py
+
+demo:
+	@echo ""
+	@echo "  Running observability demo (3 phases: normal / schema errors / poisoning attack)."
+	@echo "  Requires inference API running on port 30100 (K8s or Docker Compose)."
+	@echo "  Watch live Grafana metrics at:  http://localhost:30200  (K8s only)"
+	@echo ""
+	uv run python scripts/observability_demo.py
+
+# ── Docker Compose — published images, no K8s required ─────────────────────
+
+docker-up: check-docker
+	docker compose pull
+	docker compose up -d
+	@echo ""
+	@echo "  Services started from DockerHub images. Open:"
+	@echo "    Streamlit UI  ->  http://localhost:30000"
+	@echo "    API Docs      ->  http://localhost:30100/docs"
+	@echo "    API Health    ->  http://localhost:30100/health"
+	@echo ""
+	@echo "  Note: Grafana/Prometheus not available in Docker Compose mode."
+	@echo "  Run 'just deploy-all' for the full K8s stack with observability."
+	@echo ""
+
+docker-down:
+	docker compose down
+
+# ── Tool installation ───────────────────────────────────────────────────────
+
+install-k8s-tools:
+	uv run python scripts/install_k8s_tools.py
