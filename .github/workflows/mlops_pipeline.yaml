@@ -62,8 +62,6 @@ jobs:
     needs: ci
     if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) || github.event_name == 'repository_dispatch'
     env:
-      DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-      DAGSHUB_PAT: ${{ secrets.DAGSHUB_PAT }}
       MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/rossmann-ops.mlflow
       MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_PAT }}
@@ -76,6 +74,12 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --frozen
+
+      - name: Configure DVC credentials
+        run: |
+          uv run dvc remote modify dagshub --local auth basic
+          uv run dvc remote modify dagshub --local user ${{ secrets.DAGSHUB_USERNAME }}
+          uv run dvc remote modify dagshub --local password ${{ secrets.DAGSHUB_PAT }}
 
       - name: Pull data from DagsHub
         run: uv run dvc pull -r dagshub
@@ -104,8 +108,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
-      DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
-      DAGSHUB_PAT: ${{ secrets.DAGSHUB_PAT }}
       MLFLOW_TRACKING_URI: https://dagshub.com/${{ secrets.DAGSHUB_USERNAME }}/rossmann-ops.mlflow
       MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_PAT }}
@@ -119,8 +121,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Pull data from DagsHub
-        run: uv run dvc pull -r dagshub
+      - name: Configure DVC + pull data
+        run: |
+          uv run dvc remote modify dagshub --local auth basic
+          uv run dvc remote modify dagshub --local user ${{ secrets.DAGSHUB_USERNAME }}
+          uv run dvc remote modify dagshub --local password ${{ secrets.DAGSHUB_PAT }}
+          uv run dvc pull -r dagshub
 
       # attack mode correctly exits 1 (detects poisoning) — mark continue-on-error
       # so the job passes and logs are visible, not swallowed in a red job failure

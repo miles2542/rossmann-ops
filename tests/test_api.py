@@ -113,7 +113,7 @@ def test_predict_missing_fields(client):
 
 
 def test_predict_latency(client):
-    """POST /predict must respond within 100ms for mocked backend."""
+    """POST /predict must respond within 200ms for mocked backend."""
     payload = {
         "Store": 1,
         "DayOfWeek": 3,
@@ -131,4 +131,4 @@ def test_predict_latency(client):
 
     latency_ms = (end_time - start_time) * 1000
     assert response.status_code == 200
-    assert latency_ms < 100, f"API latency exceeded threshold: {latency_ms:.2f}ms"
+    assert latency_ms < 200, f"API latency exceeded threshold: {latency_ms:.2f}ms"

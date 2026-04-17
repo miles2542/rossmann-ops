@@ -2,6 +2,3 @@
     remote = dagshub
 ['remote "dagshub"']
     url = https://dagshub.com/miles2542/rossmann-ops.dvc
-    auth = basic
-    user = ${DAGSHUB_USERNAME}
-    password = ${DAGSHUB_PAT}
