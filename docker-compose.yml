@@ -1,0 +1,39 @@
+# docker-compose.yml
+#
+# Runs the published DockerHub images without requiring a Kubernetes cluster.
+# Requires only Docker Desktop — no kind, kubectl, or helm needed.
+#
+# Usage:
+#   just docker-up     # Pull latest images and start services
+#   just docker-down   # Stop and remove containers
+#
+# Services will be available at:
+#   Streamlit UI  ->  http://localhost:30000
+#   API Docs      ->  http://localhost:30100/docs
+#   API Health    ->  http://localhost:30100/health
+#
+# Note: Prometheus/Grafana monitoring is NOT included in this mode.
+# Use 'just deploy-all' for the full K8s stack with observability.
+
+services:
+  api:
+    image: miles25420/rossmann-api:latest
+    ports:
+      - "30100:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  ui:
+    image: miles25420/rossmann-ui:latest
+    ports:
+      - "30000:8501"
+    environment:
+      # Docker Compose default network allows services to resolve each other by name.
+      - API_URL=http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
