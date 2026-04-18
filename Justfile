@@ -21,7 +21,7 @@ install:
 pull:
 	@uv run dvc remote modify --local dagshub user {{env_var("DAGSHUB_USERNAME")}}
 	@uv run dvc remote modify --local dagshub password {{env_var("DAGSHUB_PAT")}}
-	uv run dvc pull
+	uv run dvc pull --force
 
 push:
 	@uv run dvc remote modify --local dagshub user {{env_var("DAGSHUB_USERNAME")}}
