@@ -1,4 +1,5 @@
 set windows-shell := ["pwsh", "-c"]
+set dotenv-load := true
 export PYTHONPATH := "src"
 
 # Ensures Docker Desktop is running before any build step.
@@ -14,10 +15,14 @@ install:
 	uv sync
 
 pull:
-	dvc pull
+	@uv run dvc remote modify --local dagshub user {{env_var("DAGSHUB_USERNAME")}}
+	@uv run dvc remote modify --local dagshub password {{env_var("DAGSHUB_PAT")}}
+	uv run dvc pull
 
 push:
-	dvc push
+	@uv run dvc remote modify --local dagshub user {{env_var("DAGSHUB_USERNAME")}}
+	@uv run dvc remote modify --local dagshub password {{env_var("DAGSHUB_PAT")}}
+	uv run dvc push
 
 lint *args:
 	uv run ruff check . {{args}}
@@ -43,6 +48,8 @@ build-ui: check-docker
 
 setup-prod:
 	just setup
+	@echo "Cleaning old MLflow/DVC artifacts to avoid absolute path issues..."
+	just clean-artifacts --yes
 	just train-prod
 	just build-api
 	just build-ui
@@ -50,8 +57,8 @@ setup-prod:
 	just k8s-load
 	just k8s-deploy
 
-clean-artifacts:
-	@uv run python scripts/clean_artifacts.py
+clean-artifacts *args:
+	@uv run python scripts/clean_artifacts.py {{args}}
 
 k8s-up:
 	@uv run python scripts/k8s_up.py
