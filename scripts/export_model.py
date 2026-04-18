@@ -13,17 +13,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def export_latest_model():
+def export_latest_model() -> None:
     """
-    LOCAL UTILITY — not called by the CI/CD pipeline.
+    LOCAL UTILITY — not called by the CI/CD pipeline or 'just deploy-all'.
 
     Finds the latest run in 'Rossmann_Production' and copies the model
     artifact from the MLflow artifact store to models/production_model/.
     Use this locally to swap in a specific historical run without retraining:
 
-        MLFLOW_TRACKING_URI=... uv run python scripts/export_model.py
+        uv run python -m scripts.export_model
 
-    In CI, train_model.py saves the model directly to models/ during training.
+    NOTE: DagsHub runs an MLflow 2.x server which does not support model
+    artifact storage from MLflow 3.x clients (artifact_path upload silently
+    fails). Model artifacts are versioned via DVC instead. Run 'just pull'
+    to restore the latest DVC-tracked model, or 'just train-prod' to train
+    a fresh one locally.
     """
     mlflow.set_tracking_uri(
         os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlruns/mlflow.db")

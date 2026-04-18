@@ -1,6 +1,10 @@
 set windows-shell := ["pwsh", "-c"]
 set dotenv-load := true
 export PYTHONPATH := "src"
+export PYTHONUTF8 := "1"
+export MLFLOW_TRACKING_URI := env_var("MLFLOW_TRACKING_URI")
+export MLFLOW_TRACKING_USERNAME := env_var("MLFLOW_TRACKING_USERNAME")
+export MLFLOW_TRACKING_PASSWORD := env_var("MLFLOW_TRACKING_PASSWORD")
 
 # Ensures Docker Desktop is running before any build step.
 # Attempts auto-launch on Windows; waits up to 90s for daemon to become ready.
@@ -40,7 +44,7 @@ train-prod:
 export-model:
 	uv run python -m scripts.export_model
 
-build-api: check-docker export-model
+build-api: check-docker
 	docker build -f Dockerfile.api -t rossmann-api:latest .
 
 build-ui: check-docker
