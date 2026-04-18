@@ -209,7 +209,7 @@ def train_production_model() -> None:
             mlflow.log_artifact(shap_tmp)
 
         # 13. Log Model to MLflow Registry
-        mlflow.sklearn.log_model(model, name="production_model")
+        mlflow.sklearn.log_model(model, artifact_path="production_model")
 
         # 14. Save Model Locally for Docker/CI builds
         local_model_dir = project_root / config["model"]["save_path"]
