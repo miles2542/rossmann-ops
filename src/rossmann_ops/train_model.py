@@ -208,8 +208,16 @@ def train_production_model() -> None:
             plt.savefig(shap_tmp) if False else shutil.copy(shap_out_path, shap_tmp)
             mlflow.log_artifact(shap_tmp)
 
-        # 13. Log Model to MLflow Registry
-        mlflow.sklearn.log_model(model, artifact_path="production_model")
+        # 13. Log Model to MLflow Registry (wrapped in try/except with fast timeout for network resilience)
+        os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = "1"
+        try:
+            mlflow.sklearn.log_model(model, artifact_path="production_model")
+        except Exception as e:
+            logger.warning(
+                "Failed to upload model to MLflow remote Registry due to network issue (%s). "
+                "Falling back to local DVC artifact.",
+                e,
+            )
 
         # 14. Save Model Locally for Docker/CI builds
         local_model_dir = project_root / config["model"]["save_path"]
